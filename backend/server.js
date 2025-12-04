@@ -4,14 +4,33 @@ const server = express();
 const port = 3000;
 const mongoose = require("mongoose"); //import mongoose
 require("dotenv").config(); //import dotenv
-const { DB_URI } = process.env; //to grab the same variable from the dotenv file
+const { DB_URI, SECRET_KEY } = process.env; //to grab the same variable from the dotenv file
 const cors = require("cors"); //For disabling default browser security
 const Contact = require("./models/contact"); //importing the model schema
+const User = require("./models/user");
+const jwt = require("jsonwebtoken");
+const bcrypt = require("bcrypt");
 
 //Middleware
 server.use(express.json()); //to ensure data is trasmitted as json
 server.use(express.urlencoded({ extended: true })); //to ensure data is encoded and decoded while transmission
 server.use(cors());
+
+const authenticateToken = (request, response, next) => {
+  const token = request.headers['authorization']?.split(' ')[1];
+  
+  if (!token) {
+    return response.status(401).send({ message: "Access token required" });
+  }
+  
+  jwt.verify(token, SECRET_KEY, (error, user) => {
+    if (error) {
+      return response.status(403).send({ message: "Invalid or expired token" });
+    }
+    request.user = user;
+    next();
+  });
+};
 
 //Database connection and server listening
 mongoose
@@ -31,7 +50,7 @@ server.get("/", (request, response) => {
 });
 
 //To GET all the data from contacts collection
-server.get("/contacts", async (request, response) => {
+server.get("/contacts", authenticateToken, async (request, response) => {
   try {
     const contacts = await Contact.find();
     response.send(contacts);
@@ -41,7 +60,7 @@ server.get("/contacts", async (request, response) => {
 });
 
 //To POST a new contact to DB
-server.post("/contacts", async (request, response) => {
+server.post("/contacts", authenticateToken, async (request, response) => {
   const { name, email, address, phone, image } = request.body;
   const newContact = new Contact({
     name,
@@ -106,3 +125,75 @@ server.patch("/contacts/:id", async (request, response) => {
     response.status(500).send({ message: error.message });
   }
 });
+
+server.post("/login", async (request, response) => {
+  const { username, password } = request.body;
+  
+  try {
+    const user = await User.findOne({ username });
+    
+    if (!user) {
+      return response.status(401).send({ message: "Invalid username or password" });
+    }
+    
+    const isValidPassword = await bcrypt.compare(password, user.password);
+    
+    if (!isValidPassword) {
+      return response.status(401).send({ message: "Invalid username or password" });
+    }
+    
+    const token = jwt.sign({ username: user.username }, SECRET_KEY, { expiresIn: '1h' });
+    
+    response.status(201).send({
+      message: "Login successful",
+      token: token,
+      username: user.username
+    });
+    
+  } catch (error) {
+    response.status(500).send({ message: error.message });
+  }
+});
+
+server.post("/register", async (request, response) => {
+  const { username, password } = request.body;
+  try {
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const newUser = new User({
+      username,
+      password: hashedPassword,
+    });
+    await newUser.save();
+    response.send({ message: "User Created!" });
+  } catch (error) {
+    response
+      .status(500)
+      .send({ message: "User Already Exists, please find another username" });
+  }
+});
+
+server.post("/login", async (request, response) => {
+  const { username, password } = request.body;
+
+  try {
+    const user = await User.findOne({ username });
+    if (!user) {
+      return response.status(404).send({ message: "User does not exist" });
+    }
+
+    const match = await bcrypt.compare(password, user.password);
+    if (!match) {
+      return response
+        .status(403)
+        .send({ message: "Incorrect username or password" });
+    }
+
+    const jwtToken = jwt.sign({ id: user._id, username }, SECRET_KEY);
+    return response
+      .status(201)
+      .send({ message: "User Authenticated", token: jwtToken });
+  } catch (error) {
+    response.status(500).send({ message: error.message });
+  }
+});
+

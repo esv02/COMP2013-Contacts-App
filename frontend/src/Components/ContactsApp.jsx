@@ -2,9 +2,13 @@ import { useState, useEffect } from "react";
 import axios from "axios";
 import ContactsCardsContainer from "./ContactsCardsContainer";
 import ContactForm from "./ContactForm";
+import Cookies from "js-cookie";
+import { useNavigate } from "react-router-dom";
+import { jwtDecode } from "jwt-decode";
 
 export default function ContactsApp() {
   //States
+  const navigate = useNavigate();
   const [contactsData, setContactsData] = useState([]);
   const [formData, setFormData] = useState({
     name: "",
@@ -15,25 +19,48 @@ export default function ContactsApp() {
   });
   const [postResponse, setPostResponse] = useState("");
   const [isEditing, setIsEditing] = useState(false);
+  const [currentUser, setCurrentUser] = useState(() => {
+    const jwtToken = Cookies.get("jwt-authorization");
+    if (!jwtToken) return "";
+    try {
+      const decodedToken = jwtDecode(jwtToken);
+      return decodedToken.username || "";
+    } catch {
+      return "";
+    }
+  });
 
-  //useEffect
+  useEffect(() => {
+    const jwtToken = Cookies.get("jwt-authorization");
+
+    if (!jwtToken) {
+      navigate("/login");
+      return;
+    }
+
+    try {
+      jwtDecode(jwtToken);
+      axios.defaults.headers.common['Authorization'] = `Bearer ${jwtToken}`;
+    } catch (error) {
+      console.error("Invalid JWT", error);
+      navigate("/");
+    }
+  }, [navigate]);
+
   useEffect(() => {
     handleContactsDB();
   }, [postResponse]);
 
   //Handlers
-  //GET Data from DB handler
   const handleContactsDB = async () => {
     try {
       const response = await axios.get("http://localhost:3000/contacts");
-      // console.log(response);
       setContactsData(() => response.data);
     } catch (error) {
       console.log(error.message);
     }
   };
 
-  //Handle to reset the form
   const handleResetForm = () => {
     setFormData({
       name: "",
@@ -44,7 +71,6 @@ export default function ContactsApp() {
     });
   };
 
-  //Handle the submission of data
   const handleOnSubmit = async (e) => {
     e.preventDefault();
     try {
@@ -66,14 +92,12 @@ export default function ContactsApp() {
     }
   };
 
-  //Handle the onChange event for the form
   const handleOnChange = (e) => {
     setFormData((prevData) => {
       return { ...prevData, [e.target.name]: e.target.value };
     });
   };
 
-  //Handle to delete on contact by id
   const handleOnDelete = async (id) => {
     try {
       const response = await axios.delete(
@@ -86,7 +110,6 @@ export default function ContactsApp() {
     }
   };
 
-  //Handle the edition of one contact by its id
   const handleOnEdit = async (id) => {
     try {
       const contactToEdit = await axios.get(
@@ -107,7 +130,6 @@ export default function ContactsApp() {
     }
   };
 
-  //Handle updating the api patch route
   const handleOnUpdate = async (id) => {
     try {
       const result = await axios.patch(
@@ -120,9 +142,17 @@ export default function ContactsApp() {
     }
   };
 
-  //Render
+  const handleLogout = () => {
+    Cookies.remove("jwt-authorization");
+    delete axios.defaults.headers.common["Authorization"];
+    setCurrentUser("");
+    navigate("/");
+  };
+
   return (
     <div>
+      <h2>Welcome, {currentUser}</h2>
+      <button onClick={handleLogout}>Logout</button>
       <ContactForm
         name={formData.name}
         email={formData.email}
